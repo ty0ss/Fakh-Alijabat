@@ -2,7 +2,7 @@
 'use strict';
 
 const $ = id => document.getElementById(id);
-const KEY = 'fakh-alijabat-v3';
+const KEY = 'fakh-alijabat-v4';
 
 let questions = [];
 let players = [];
@@ -11,6 +11,8 @@ let round = 1;
 let deck = [];
 let cursor = 0;
 let current = null;
+let displayedOptions = [];
+let displayedCorrect = null;
 let selected = null;
 let timedOut = false;
 let seconds = 60;
@@ -21,6 +23,7 @@ let chosenImpostors = new Set();
 let screen = 'home-screen';
 let scoresApplied = false;
 let gameActive = false;
+let menuReturnScreen = 'home-screen';
 
 function shuffle(items) {
   const arr = [...items];
@@ -34,8 +37,8 @@ function shuffle(items) {
 }
 
 function setText(id, value) {
-  const el = $(id);
-  if (el) el.textContent = value;
+  const element = $(id);
+  if (element) element.textContent = value;
 }
 
 function save() {
@@ -47,6 +50,8 @@ function save() {
       deck,
       cursor,
       currentId: current ? current.id : null,
+      displayedOptions,
+      displayedCorrect,
       selected,
       timedOut,
       seconds,
@@ -72,6 +77,13 @@ function show(id) {
 }
 
 function stopTimer() {
+  if (running && deadline) {
+    seconds = Math.max(
+      0,
+      Math.ceil((deadline - Date.now()) / 1000)
+    );
+  }
+
   clearInterval(timer);
   timer = null;
   running = false;
@@ -93,7 +105,11 @@ function renderTimer() {
     progress.style.width = (seconds / 60 * 100) + '%';
   }
 
-  $('timer').classList.toggle('urgent', seconds <= 10);
+  const display = $('timer');
+
+  if (display) {
+    display.classList.toggle('urgent', seconds <= 10);
+  }
 
   setText(
     'pause-btn',
@@ -102,9 +118,12 @@ function renderTimer() {
 }
 
 function startTimer() {
-  if (running || timedOut || screen !== 'question-screen') {
-    return;
-  }
+  if (
+    running ||
+    timedOut ||
+    seconds <= 0 ||
+    screen !== 'question-screen'
+  ) return;
 
   running = true;
   deadline = Date.now() + seconds * 1000;
@@ -118,23 +137,20 @@ function startTimer() {
     );
 
     renderTimer();
-    save();
 
     if (seconds === 0) {
       timedOut = true;
       selected = null;
       stopTimer();
       reveal();
+    } else {
+      save();
     }
   }, 200);
 }
 
 function toggleTimer() {
   if (running) {
-    seconds = Math.max(
-      0,
-      Math.ceil((deadline - Date.now()) / 1000)
-    );
     stopTimer();
 
     if (seconds === 0) {
@@ -210,45 +226,45 @@ function getNextQuestion() {
   if (!questions.length) return null;
 
   if (!deck.length || cursor >= deck.length) {
+    const previousId = current ? current.id : null;
     createDeck();
-  }
 
-  let nextId = deck[cursor++];
+    if (
+      questions.length > 1 &&
+      deck[0] === previousId
+    ) {
+      const index = deck.findIndex(id => id !== previousId);
 
-  // Avoid repeating the last question when a deck restarts.
-  if (
-    current &&
-    questions.length > 1 &&
-    nextId === current.id
-  ) {
-    if (cursor < deck.length) {
-      [deck[cursor - 1], deck[cursor]] =
-        [deck[cursor], deck[cursor - 1]];
-
-      nextId = deck[cursor - 1];
-    } else {
-      createDeck();
-
-      if (deck[0] === current.id) {
-        const swap = deck.findIndex(
-          id => id !== current.id
-        );
-
-        [deck[0], deck[swap]] =
-          [deck[swap], deck[0]];
-      }
-
-      nextId = deck[cursor++];
+      [deck[0], deck[index]] =
+        [deck[index], deck[0]];
     }
   }
 
+  const nextId = deck[cursor++];
   return questions.find(q => q.id === nextId) || null;
+}
+
+function shuffleAnswers(question) {
+  const choices = question.options.map((answer, index) => ({
+    answer,
+    originalIndex: index
+  }));
+
+  const shuffled = shuffle(choices);
+
+  displayedOptions = shuffled.map(item => item.answer);
+
+  displayedCorrect = shuffled.findIndex(
+    item => item.originalIndex === question.correct
+  );
 }
 
 function prepareRound() {
   stopTimer();
 
   current = null;
+  displayedOptions = [];
+  displayedCorrect = null;
   selected = null;
   timedOut = false;
   seconds = 60;
@@ -264,7 +280,7 @@ function prepareRound() {
 }
 
 function nextQuestion() {
-  if (!gameActive) return;
+  if (!gameActive || screen !== 'roles-screen') return;
 
   stopTimer();
 
@@ -276,6 +292,8 @@ function nextQuestion() {
   }
 
   current = next;
+  shuffleAnswers(current);
+
   selected = null;
   timedOut = false;
   seconds = 60;
@@ -302,7 +320,7 @@ function renderQuestion() {
 
   const letters = ['أ', 'ب', 'ج', 'د'];
 
-  current.options.forEach((answer, index) => {
+  displayedOptions.forEach((answer, index) => {
     const button = document.createElement('button');
 
     button.className =
@@ -319,9 +337,10 @@ function renderQuestion() {
     button.append(letter, value);
 
     button.onclick = () => {
-      if (timedOut || screen !== 'question-screen') {
-        return;
-      }
+      if (
+        timedOut ||
+        screen !== 'question-screen'
+      ) return;
 
       selected = index;
       renderQuestion();
@@ -342,11 +361,11 @@ function reveal() {
 
   stopTimer();
 
-  const correct = selected === current.correct;
+  const correct = selected === displayedCorrect;
 
   setText(
     'correct-answer',
-    current.options[current.correct]
+    displayedOptions[displayedCorrect]
   );
 
   setText(
@@ -429,7 +448,7 @@ function calculateScores() {
   }
 
   if (!timedOut && current) {
-    const correct = selected === current.correct;
+    const correct = selected === displayedCorrect;
 
     players.forEach(player => {
       const isImpostor = chosenImpostors.has(player.id);
@@ -479,7 +498,9 @@ function renderLeaderboard(id) {
 }
 
 function advanceRound() {
-  if (!scoresApplied) return;
+  if (!scoresApplied || screen !== 'leaderboard-screen') {
+    return;
+  }
 
   round += 1;
   prepareRound();
@@ -516,6 +537,8 @@ function startGame() {
 
   round = 1;
   current = null;
+  displayedOptions = [];
+  displayedCorrect = null;
   selected = null;
   timedOut = false;
   scoresApplied = false;
@@ -526,15 +549,22 @@ function startGame() {
   prepareRound();
 }
 
-function resetGame() {
+function resetGame(keepPlayers = false) {
   stopTimer();
 
-  players = [];
-  impostorCount = 2;
+  if (keepPlayers) {
+    players.forEach(p => p.score = 0);
+  } else {
+    players = [];
+    impostorCount = 2;
+  }
+
   round = 1;
   deck = [];
   cursor = 0;
   current = null;
+  displayedOptions = [];
+  displayedCorrect = null;
   selected = null;
   timedOut = false;
   seconds = 60;
@@ -542,7 +572,7 @@ function resetGame() {
   gameActive = false;
   chosenImpostors.clear();
 
-  $('impostor-count').value = '2';
+  $('impostor-count').value = String(impostorCount);
   $('player-name').value = '';
 
   setText('setup-message', '');
@@ -551,16 +581,12 @@ function resetGame() {
   localStorage.removeItem(KEY);
   localStorage.removeItem('fakh-alijabat-v1');
   localStorage.removeItem('fakh-alijabat-v2');
+  localStorage.removeItem('fakh-alijabat-v3');
 
-  show('home-screen');
+  show('setup-screen');
 }
 
 function endGame() {
-  if (!gameActive) {
-    show('home-screen');
-    return;
-  }
-
   stopTimer();
   gameActive = false;
 
@@ -568,20 +594,27 @@ function endGame() {
   show('end-screen');
 }
 
-function confirmNewGame() {
-  if (!confirm(
-    'تبدؤون لعبة جديدة؟ راح تنمسح النقاط والجولات السابقة.'
-  )) return;
+function confirmNewGame(keepPlayers = false) {
+  const message = keepPlayers
+    ? 'تبدؤون تحدي جديد بنفس اللاعبين؟ راح تتصفر النقاط.'
+    : 'تبدؤون لعبة جديدة؟ راح تنمسح النقاط وأسماء اللاعبين.';
+
+  if (!confirm(message)) return;
 
   closeMenu();
-  resetGame();
-  show('setup-screen');
+  resetGame(keepPlayers);
 }
 
 function confirmEndGame() {
-  if (!confirm(
-    'متأكدين تبغون تنهُون اللعبة الحالية؟'
-  )) return;
+  if (!gameActive) {
+    closeMenu();
+    show('end-screen');
+    return;
+  }
+
+  if (!confirm('متأكدين تبغون تنهُون اللعبة؟')) {
+    return;
+  }
 
   closeMenu();
   endGame();
@@ -655,18 +688,52 @@ function createMenu() {
   panel.hidden = true;
 
   const items = [
-    ['متابعة اللعب', () => closeMenu()],
+    ['متابعة اللعب', resumeGame],
     ['ترتيب اللاعبين', () => {
-      if (!gameActive || !scoresApplied) {
-        alert('يظهر الترتيب بعد حساب نقاط الجولة');
+      if (!gameActive) {
+        alert('ما فيه لعبة جارية حالياً');
         return;
       }
 
       closeMenu();
+
+      menuReturnScreen = screen;
+
+      if (screen === 'question-screen') {
+        stopTimer();
+      }
+
       renderLeaderboard('leaderboard-list');
+      setText('leaderboard-round', 'الجولة ' + round);
+
       show('leaderboard-screen');
+
+      $('next-round-btn').hidden = true;
+      $('end-game-btn').hidden = true;
+
+      let back = $('back-from-scores');
+
+      if (!back) {
+        back = document.createElement('button');
+        back.id = 'back-from-scores';
+        back.className = 'btn secondary';
+        back.textContent = 'رجوع للعبة';
+
+        $('leaderboard-screen')
+          .querySelector('.panel')
+          .append(back);
+      }
+
+      back.hidden = false;
+      back.onclick = () => {
+        back.hidden = true;
+        $('next-round-btn').hidden = false;
+        $('end-game-btn').hidden = false;
+        show(menuReturnScreen);
+      };
     }],
-    ['لعبة جديدة', confirmNewGame],
+    ['لعبة جديدة', () => confirmNewGame(false)],
+    ['إعادة بنفس اللاعبين', () => confirmNewGame(true)],
     ['إنهاء اللعبة', confirmEndGame],
     ['الصفحة الرئيسية', () => {
       closeMenu();
@@ -694,29 +761,43 @@ function closeMenu() {
   if (panel) panel.hidden = true;
 }
 
+function resumeGame() {
+  closeMenu();
+
+  if (!gameActive) {
+    show('home-screen');
+    return;
+  }
+
+  if (scoresApplied) {
+    renderLeaderboard('leaderboard-list');
+    setText('leaderboard-round', 'بعد الجولة ' + round);
+    $('next-round-btn').hidden = false;
+    $('end-game-btn').hidden = false;
+
+    const back = $('back-from-scores');
+    if (back) back.hidden = true;
+
+    show('leaderboard-screen');
+  } else if (current) {
+    if (screen === 'home-screen') {
+      renderQuestion();
+      show('question-screen');
+    }
+  } else {
+    show('roles-screen');
+  }
+}
+
 // BUTTONS
 
 $('play-btn').onclick = () => {
   if (gameActive) {
-    const resume = confirm(
-      'عندكم لعبة جارية. تبغون تكملونها؟'
-    );
-
-    if (resume) {
-      if (current && !scoresApplied) {
-        if (screen === 'home-screen') {
-          renderQuestion();
-          show('question-screen');
-          // Timer stays paused until resumed.
-        }
-      } else {
-        show('roles-screen');
-      }
-
-      return;
+    if (confirm('عندكم لعبة جارية. تبغون تكملونها؟')) {
+      resumeGame();
+    } else {
+      confirmNewGame(false);
     }
-
-    confirmNewGame();
     return;
   }
 
@@ -724,9 +805,7 @@ $('play-btn').onclick = () => {
 };
 
 $('rules-btn').onclick = () => show('rules-screen');
-
 $('rules-back-btn').onclick = () => show('home-screen');
-
 $('setup-back-btn').onclick = () => show('home-screen');
 
 $('add-player-btn').onclick = addPlayer;
@@ -741,9 +820,7 @@ $('impostor-count').onchange = event => {
 };
 
 $('start-game-btn').onclick = startGame;
-
 $('show-question-btn').onclick = nextQuestion;
-
 $('pause-btn').onclick = toggleTimer;
 
 $('lock-answer-btn').onclick = () => {
@@ -762,12 +839,9 @@ $('go-to-scoring-btn').onclick = () => {
 };
 
 $('calculate-scores-btn').onclick = calculateScores;
-
 $('next-round-btn').onclick = advanceRound;
-
 $('end-game-btn').onclick = confirmEndGame;
-
-$('new-game-btn').onclick = confirmNewGame;
+$('new-game-btn').onclick = () => confirmNewGame(false);
 
 // INITIALIZATION
 
@@ -805,9 +879,10 @@ async function init() {
     alert('تعذر تحميل الأسئلة من questions.json');
   }
 
-  // Remove previous buggy saves.
-  localStorage.removeItem('fakh-alijabat-v1');
-  localStorage.removeItem('fakh-alijabat-v2');
+  // Remove older saved sessions.
+  ['v1', 'v2', 'v3'].forEach(version => {
+    localStorage.removeItem('fakh-alijabat-' + version);
+  });
 
   try {
     const old = JSON.parse(
@@ -821,12 +896,22 @@ async function init() {
     round = old.round || 1;
     deck = Array.isArray(old.deck) ? old.deck : [];
     cursor = old.cursor || 0;
+
     current = questions.find(
       q => q.id === old.currentId
     ) || null;
 
+    displayedOptions = Array.isArray(old.displayedOptions)
+      ? old.displayedOptions
+      : current ? [...current.options] : [];
+
+    displayedCorrect = Number.isInteger(old.displayedCorrect)
+      ? old.displayedCorrect
+      : current ? current.correct : null;
+
     selected = old.selected ?? null;
     timedOut = !!old.timedOut;
+
     seconds = Math.max(
       0,
       Math.min(60, old.seconds ?? 60)
@@ -834,12 +919,12 @@ async function init() {
 
     scoresApplied = !!old.scoresApplied;
     gameActive = !!old.gameActive;
+
     chosenImpostors = new Set(
       old.chosenImpostors || []
     );
 
     $('impostor-count').value = String(impostorCount);
-
     renderPlayers();
 
     const validScreens = [
@@ -858,9 +943,7 @@ async function init() {
       ? old.screen
       : 'home-screen';
 
-    if (current) {
-      renderQuestion();
-    }
+    if (current) renderQuestion();
 
     if (target === 'reveal-screen' && current) {
       reveal();
@@ -869,10 +952,7 @@ async function init() {
       show(target);
     } else if (target === 'leaderboard-screen') {
       renderLeaderboard('leaderboard-list');
-      setText(
-        'leaderboard-round',
-        'بعد الجولة ' + round
-      );
+      setText('leaderboard-round', 'بعد الجولة ' + round);
       show(target);
     } else if (target === 'end-screen') {
       renderLeaderboard('final-leaderboard');
@@ -886,12 +966,12 @@ async function init() {
       show(target);
     }
 
-    // Never automatically restart a timer after refresh.
+    // After refreshing, the timer stays paused.
     stopTimer();
 
   } catch (error) {
     console.error('Restore error', error);
-    resetGame();
+    resetGame(false);
   }
 }
 
