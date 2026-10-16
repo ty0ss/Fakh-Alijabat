@@ -1,0 +1,247 @@
+
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#17263f">
+  <title>فخ الإجابات</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+
+<body>
+  <main id="app">
+
+    <!-- الصفحة الرئيسية -->
+    <section id="home-screen" class="screen active">
+      <div class="home-content">
+        <div class="logo-icon">🎭</div>
+        <p class="eyebrow">مين فيكم المخادع؟</p>
+        <h1>فَخّ الإجابات</h1>
+        <p class="subtitle">
+          لا تصدّق كل إجابة تسمعها!
+        </p>
+
+        <button id="play-btn" class="btn primary">
+          ابدأ اللعب
+        </button>
+
+        <button id="rules-btn" class="btn secondary">
+          طريقة اللعب
+        </button>
+      </div>
+    </section>
+
+    <!-- تعليمات اللعبة -->
+    <section id="rules-screen" class="screen">
+      <div class="panel">
+        <h2>طريقة اللعب 🎭</h2>
+
+        <div class="rules-list">
+          <p>١. أضيفوا أسماء جميع اللاعبين.</p>
+          <p>٢. وزّعوا بطاقات الأدوار بشكل سرّي.</p>
+          <p>٣. بعض اللاعبين مخادعون، والبقية عاديون.</p>
+          <p>٤. أمامكم ٦٠ ثانية لمناقشة السؤال.</p>
+          <p>٥. اتفقوا على إجابة واحدة فقط.</p>
+          <p>٦. يحاول المخادعون إقناعكم بإجابة خاطئة.</p>
+          <p>٧. بعد كشف الإجابة، يكشف المخادعون أدوارهم.</p>
+          <p>٨. وزّعوا البطاقات من جديد كل جولة.</p>
+        </div>
+
+        <div class="scoring-info">
+          <h3>نظام النقاط</h3>
+          <p>إجابة صحيحة: +١ لكل لاعب عادي.</p>
+          <p>إجابة خاطئة: +٢ لكل مخادع.</p>
+          <p>انتهاء الوقت دون إجابة: لا نقاط لأحد.</p>
+        </div>
+
+        <button id="rules-back-btn" class="btn primary">
+          رجوع
+        </button>
+      </div>
+    </section>
+
+    <!-- تسجيل اللاعبين -->
+    <section id="setup-screen" class="screen">
+      <div class="panel">
+        <h2>مين بيلعب؟ 👀</h2>
+        <p class="subtitle">أضيفوا أسماء اللاعبين</p>
+
+        <div class="input-row">
+          <input
+            id="player-name"
+            type="text"
+            placeholder="اسم اللاعب"
+            maxlength="25"
+            autocomplete="off"
+          >
+          <button id="add-player-btn" class="btn primary">
+            إضافة +
+          </button>
+        </div>
+
+        <div id="players-list" class="players-list"></div>
+
+        <div class="setting-row">
+          <label for="impostor-count">عدد المخادعين</label>
+          <select id="impostor-count">
+            <option value="1">١ مخادع</option>
+            <option value="2" selected>٢ مخادعين</option>
+            <option value="3">٣ مخادعين</option>
+            <option value="4">٤ مخادعين</option>
+          </select>
+        </div>
+
+        <p id="setup-message" class="message"></p>
+
+        <button id="start-game-btn" class="btn primary">
+          ابدأ اللعبة
+        </button>
+        <button id="setup-back-btn" class="btn secondary">
+          رجوع
+        </button>
+      </div>
+    </section>
+
+    <!-- توزيع الأدوار -->
+    <section id="roles-screen" class="screen">
+      <div class="panel center">
+        <div class="large-icon">🃏</div>
+        <h2>وقت توزيع الأدوار!</h2>
+
+        <p>
+          وزّعوا البطاقات عشوائياً، وكل لاعب
+          يشوف دوره بدون ما يعلّم أحد.
+        </p>
+
+        <p id="roles-count"></p>
+
+        <p class="hint">
+          لا تكشفون أدواركم قبل انتهاء الجولة!
+        </p>
+
+        <button id="show-question-btn" class="btn primary">
+          اكشف السؤال
+        </button>
+      </div>
+    </section>
+
+    <!-- شاشة السؤال -->
+    <section id="question-screen" class="screen">
+      <div class="game-header">
+        <span id="round-number">الجولة ١</span>
+        <span id="question-category">منوعات</span>
+      </div>
+
+      <div class="timer-container">
+        <div id="timer">01:00</div>
+        <div class="timer-track">
+          <div id="timer-progress"></div>
+        </div>
+      </div>
+
+      <div class="question-panel">
+        <span id="difficulty-label">متوسط</span>
+        <h2 id="question-text"></h2>
+
+        <div id="question-media"></div>
+
+        <div id="answers-container" class="answers-grid">
+        </div>
+      </div>
+
+      <p class="hint center">
+        ناقشوا السؤال واختاروا إجابة واحدة!
+      </p>
+
+      <div class="game-actions">
+        <button id="pause-btn" class="btn secondary">
+          إيقاف مؤقت
+        </button>
+
+        <button id="lock-answer-btn" class="btn primary" disabled>
+          تأكيد الإجابة
+        </button>
+      </div>
+    </section>
+
+    <!-- كشف الإجابة -->
+    <section id="reveal-screen" class="screen">
+      <div class="panel center">
+        <div id="result-icon" class="large-icon">🎯</div>
+        <h2 id="result-title">الإجابة الصحيحة</h2>
+
+        <div id="correct-answer" class="answer-reveal">
+        </div>
+
+        <p id="answer-explanation"></p>
+
+        <div id="result-message"></div>
+
+        <button id="go-to-scoring-btn" class="btn primary">
+          حساب النقاط
+        </button>
+      </div>
+    </section>
+
+    <!-- حساب النقاط -->
+    <section id="scoring-screen" class="screen">
+      <div class="panel">
+        <h2>مين كانوا المخادعين؟ 🎭</h2>
+
+        <p class="subtitle">
+          اختاروا أسماء المخادعين بعد كشف أدوارهم.
+        </p>
+
+        <div id="impostor-selection" class="players-list">
+        </div>
+
+        <p id="scoring-message" class="message"></p>
+
+        <button id="calculate-scores-btn" class="btn primary">
+          احسب النقاط
+        </button>
+      </div>
+    </section>
+
+    <!-- لوحة الترتيب -->
+    <section id="leaderboard-screen" class="screen">
+      <div class="panel">
+        <h2>ترتيب اللاعبين 🏆</h2>
+
+        <p id="leaderboard-round" class="subtitle"></p>
+
+        <div id="leaderboard-list" class="leaderboard">
+        </div>
+
+        <button id="next-round-btn" class="btn primary">
+          الجولة التالية
+        </button>
+
+        <button id="end-game-btn" class="btn secondary">
+          إنهاء اللعبة
+        </button>
+      </div>
+    </section>
+
+    <!-- نهاية اللعبة -->
+    <section id="end-screen" class="screen">
+      <div class="panel center">
+        <div class="large-icon">🏆</div>
+        <h2>انتهت اللعبة!</h2>
+
+        <p>وهذا ترتيبكم النهائي!</p>
+
+        <div id="final-leaderboard" class="leaderboard">
+        </div>
+
+        <button id="new-game-btn" class="btn primary">
+          لعبة جديدة
+        </button>
+      </div>
+    </section>
+
+  </main>
+</body>
+</html>
