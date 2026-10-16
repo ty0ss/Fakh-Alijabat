@@ -2,8 +2,9 @@
 'use strict';
 
 const $ = id => document.getElementById(id);
-const KEY = 'fakh-alijabat-v1';
+const KEY = 'fakh-alijabat-v3';
 
+let questions = [];
 let players = [];
 let impostorCount = 2;
 let round = 1;
@@ -11,238 +12,367 @@ let deck = [];
 let cursor = 0;
 let current = null;
 let selected = null;
-let locked = false;
 let timedOut = false;
 let seconds = 60;
 let running = false;
-let interval = null;
-let selectedImpostors = new Set();
-let questions = [];
+let timer = null;
+let deadline = 0;
+let chosenImpostors = new Set();
+let screen = 'home-screen';
+let scoresApplied = false;
+let gameActive = false;
 
-function show(id) {
-  document.querySelectorAll('.screen').forEach(s => {
-    s.classList.toggle('active', s.id === id);
-  });
-  window.scrollTo(0, 0);
-  save(id);
+function shuffle(items) {
+  const arr = [...items];
+
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+
+  return arr;
 }
 
-function save(screen) {
+function setText(id, value) {
+  const el = $(id);
+  if (el) el.textContent = value;
+}
+
+function save() {
   try {
     localStorage.setItem(KEY, JSON.stringify({
-      players, impostorCount, round, deck, cursor,
-      currentId: current?.id,
-      selected, locked, timedOut, seconds, screen
+      players,
+      impostorCount,
+      round,
+      deck,
+      cursor,
+      currentId: current ? current.id : null,
+      selected,
+      timedOut,
+      seconds,
+      screen,
+      scoresApplied,
+      gameActive,
+      chosenImpostors: [...chosenImpostors]
     }));
-  } catch (e) {
-    console.warn('تعذر حفظ التقدم', e);
+  } catch (error) {
+    console.warn('Could not save game', error);
   }
 }
 
-function shuffle(a) {
-  const b = [...a];
-  for (let i = b.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [b[i], b[j]] = [b[j], b[i]];
-  }
-  return b;
-}
+function show(id) {
+  screen = id;
 
-function text(id, value) {
-  $(id).textContent = value;
-}
-
-function renderPlayers() {
-  $('players-list').replaceChildren();
-
-  players.forEach(p => {
-    const chip = document.createElement('div');
-    chip.className = 'player-chip';
-    chip.textContent = p.name + ' ';
-
-    const b = document.createElement('button');
-    b.textContent = '×';
-    b.setAttribute('aria-label', 'حذف ' + p.name);
-
-    b.onclick = () => {
-      players = players.filter(x => x.id !== p.id);
-      renderPlayers();
-      save('setup-screen');
-    };
-
-    chip.append(b);
-    $('players-list').append(chip);
-  });
-}
-
-function addPlayer() {
-  const name = $('player-name').value.trim();
-  if (!name) return;
-
-  if (players.some(p => p.name === name)) {
-    text('setup-message', 'هذا الاسم موجود بالفعل');
-    return;
-  }
-
-  players.push({
-    id: crypto.randomUUID?.() || String(Date.now() + Math.random()),
-    name,
-    score: 0
+  document.querySelectorAll('.screen').forEach(el => {
+    el.classList.toggle('active', el.id === id);
   });
 
-  $('player-name').value = '';
-  text('setup-message', '');
-  renderPlayers();
-  save('setup-screen');
+  window.scrollTo(0, 0);
+  save();
 }
 
-function loadDeck() {
-  if (!deck.length || cursor >= deck.length) {
-    deck = shuffle(questions.map(q => q.id));
-    cursor = 0;
-  }
-}
-
-function renderQuestion() {
-  if (!current) return;
-
-  text('round-number', 'الجولة ' + round);
-  text('question-category', current.category);
-  text('difficulty-label', current.difficulty);
-  text('question-text', current.question);
-
-  $('question-media').replaceChildren();
-
-  const box = $('answers-container');
-  box.replaceChildren();
-
-  current.options.forEach((answer, i) => {
-    const b = document.createElement('button');
-
-    b.className =
-      'answer-option' + (selected === i ? ' selected' : '');
-
-    const letter = document.createElement('span');
-    letter.className = 'answer-letter';
-    letter.textContent = ['أ', 'ب', 'ج', 'د'][i];
-
-    const value = document.createElement('span');
-    value.textContent = answer;
-
-    b.append(letter, value);
-
-    b.onclick = () => {
-      if (locked || timedOut) return;
-      selected = i;
-      renderQuestion();
-      save('question-screen');
-    };
-
-    box.append(b);
-  });
-
-  $('lock-answer-btn').disabled =
-    selected === null || locked || timedOut;
-
+function stopTimer() {
+  clearInterval(timer);
+  timer = null;
+  running = false;
+  deadline = 0;
   renderTimer();
 }
 
 function renderTimer() {
-  const minutes = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const secs = String(seconds % 60).padStart(2, '0');
+  setText(
+    'timer',
+    String(Math.floor(seconds / 60)).padStart(2, '0') +
+    ':' +
+    String(seconds % 60).padStart(2, '0')
+  );
 
-  text('timer', minutes + ':' + secs);
+  const progress = $('timer-progress');
 
-  $('timer-progress').style.width =
-    (seconds / 60 * 100) + '%';
+  if (progress) {
+    progress.style.width = (seconds / 60 * 100) + '%';
+  }
 
   $('timer').classList.toggle('urgent', seconds <= 10);
 
-  text(
+  setText(
     'pause-btn',
     running ? 'إيقاف مؤقت' : 'متابعة الوقت'
   );
 }
 
-function stopTimer() {
-  clearInterval(interval);
-  interval = null;
-  running = false;
-  renderTimer();
-}
-
 function startTimer() {
-  if (running || locked || timedOut) return;
+  if (running || timedOut || screen !== 'question-screen') {
+    return;
+  }
 
   running = true;
+  deadline = Date.now() + seconds * 1000;
+
   renderTimer();
 
-  interval = setInterval(() => {
-    seconds = Math.max(0, seconds - 1);
+  timer = setInterval(() => {
+    seconds = Math.max(
+      0,
+      Math.ceil((deadline - Date.now()) / 1000)
+    );
+
     renderTimer();
-    save('question-screen');
+    save();
 
     if (seconds === 0) {
       timedOut = true;
       selected = null;
-      locked = true;
       stopTimer();
       reveal();
     }
-  }, 1000);
+  }, 200);
 }
 
-function nextQuestion() {
-  if (!questions.length) {
-    alert('لم يتم تحميل الأسئلة. تأكدوا من ملف questions.json');
+function toggleTimer() {
+  if (running) {
+    seconds = Math.max(
+      0,
+      Math.ceil((deadline - Date.now()) / 1000)
+    );
+    stopTimer();
+
+    if (seconds === 0) {
+      timedOut = true;
+      selected = null;
+      reveal();
+    }
+  } else {
+    startTimer();
+  }
+
+  save();
+}
+
+function addPlayer() {
+  const input = $('player-name');
+  const name = input.value.trim();
+
+  if (!name) return;
+
+  if (players.some(p => p.name === name)) {
+    setText('setup-message', 'هذا الاسم موجود بالفعل');
     return;
   }
 
-  loadDeck();
+  players.push({
+    id: String(Date.now()) + '-' + Math.random(),
+    name,
+    score: 0
+  });
 
-  current = questions.find(q => q.id === deck[cursor++]);
+  input.value = '';
+  setText('setup-message', '');
+  renderPlayers();
+  save();
+}
 
+function renderPlayers() {
+  const box = $('players-list');
+  box.replaceChildren();
+
+  players.forEach(player => {
+    const chip = document.createElement('div');
+    chip.className = 'player-chip';
+
+    const name = document.createElement('span');
+    name.textContent = player.name;
+
+    const remove = document.createElement('button');
+    remove.textContent = '×';
+    remove.setAttribute(
+      'aria-label',
+      'حذف ' + player.name
+    );
+
+    remove.onclick = () => {
+      players = players.filter(p => p.id !== player.id);
+      renderPlayers();
+      save();
+    };
+
+    chip.append(name, remove);
+    box.append(chip);
+  });
+}
+
+function createDeck() {
+  deck = shuffle(questions.map(q => q.id));
+  cursor = 0;
+}
+
+function getNextQuestion() {
+  if (!questions.length) return null;
+
+  if (!deck.length || cursor >= deck.length) {
+    createDeck();
+  }
+
+  let nextId = deck[cursor++];
+
+  // Avoid repeating the last question when a deck restarts.
+  if (
+    current &&
+    questions.length > 1 &&
+    nextId === current.id
+  ) {
+    if (cursor < deck.length) {
+      [deck[cursor - 1], deck[cursor]] =
+        [deck[cursor], deck[cursor - 1]];
+
+      nextId = deck[cursor - 1];
+    } else {
+      createDeck();
+
+      if (deck[0] === current.id) {
+        const swap = deck.findIndex(
+          id => id !== current.id
+        );
+
+        [deck[0], deck[swap]] =
+          [deck[swap], deck[0]];
+      }
+
+      nextId = deck[cursor++];
+    }
+  }
+
+  return questions.find(q => q.id === nextId) || null;
+}
+
+function prepareRound() {
+  stopTimer();
+
+  current = null;
   selected = null;
-  locked = false;
   timedOut = false;
   seconds = 60;
-  selectedImpostors.clear();
+  scoresApplied = false;
+  chosenImpostors.clear();
+
+  setText(
+    'roles-count',
+    'عدد المخادعين: ' + impostorCount
+  );
+
+  show('roles-screen');
+}
+
+function nextQuestion() {
+  if (!gameActive) return;
+
+  stopTimer();
+
+  const next = getNextQuestion();
+
+  if (!next) {
+    alert('تعذر تحميل السؤال التالي');
+    return;
+  }
+
+  current = next;
+  selected = null;
+  timedOut = false;
+  seconds = 60;
+  scoresApplied = false;
+  chosenImpostors.clear();
 
   renderQuestion();
   show('question-screen');
   startTimer();
 }
 
-function reveal() {
-  stopTimer();
+function renderQuestion() {
   if (!current) return;
 
-  text('correct-answer', current.options[current.correct]);
-  text('answer-explanation', current.explanation || '');
+  setText('round-number', 'الجولة ' + round);
+  setText('question-category', current.category);
+  setText('difficulty-label', current.difficulty);
+  setText('question-text', current.question);
 
-  text(
+  $('question-media').replaceChildren();
+
+  const box = $('answers-container');
+  box.replaceChildren();
+
+  const letters = ['أ', 'ب', 'ج', 'د'];
+
+  current.options.forEach((answer, index) => {
+    const button = document.createElement('button');
+
+    button.className =
+      'answer-option' +
+      (selected === index ? ' selected' : '');
+
+    const letter = document.createElement('span');
+    letter.className = 'answer-letter';
+    letter.textContent = letters[index];
+
+    const value = document.createElement('span');
+    value.textContent = answer;
+
+    button.append(letter, value);
+
+    button.onclick = () => {
+      if (timedOut || screen !== 'question-screen') {
+        return;
+      }
+
+      selected = index;
+      renderQuestion();
+      save();
+    };
+
+    box.append(button);
+  });
+
+  $('lock-answer-btn').disabled =
+    selected === null || timedOut;
+
+  renderTimer();
+}
+
+function reveal() {
+  if (!current) return;
+
+  stopTimer();
+
+  const correct = selected === current.correct;
+
+  setText(
+    'correct-answer',
+    current.options[current.correct]
+  );
+
+  setText(
+    'answer-explanation',
+    current.explanation || ''
+  );
+
+  setText(
     'result-title',
     timedOut
       ? 'انتهى الوقت!'
-      : selected === current.correct
+      : correct
         ? 'إجابة صحيحة!'
         : 'إجابة خاطئة!'
   );
 
-  text(
+  setText(
     'result-icon',
-    timedOut
-      ? '⏰'
-      : selected === current.correct
-        ? '🎉'
-        : '🎭'
+    timedOut ? '⏰' : correct ? '🎉' : '🎯'
   );
 
-  text(
+  setText(
     'result-message',
     timedOut
       ? 'لا نقاط لهذه الجولة'
-      : selected === current.correct
+      : correct
         ? 'نقطة لكل لاعب عادي'
         : 'نقطتان لكل مخادع'
   );
@@ -254,167 +384,344 @@ function renderImpostors() {
   const box = $('impostor-selection');
   box.replaceChildren();
 
-  players.forEach(p => {
-    const b = document.createElement('button');
+  players.forEach(player => {
+    const button = document.createElement('button');
 
-    b.className =
+    button.className =
       'impostor-option' +
-      (selectedImpostors.has(p.id) ? ' selected' : '');
+      (chosenImpostors.has(player.id) ? ' selected' : '');
 
-    b.textContent = p.name;
+    button.textContent = player.name;
 
-    b.onclick = () => {
-      if (selectedImpostors.has(p.id)) {
-        selectedImpostors.delete(p.id);
-      } else if (selectedImpostors.size < impostorCount) {
-        selectedImpostors.add(p.id);
+    button.onclick = () => {
+      if (chosenImpostors.has(player.id)) {
+        chosenImpostors.delete(player.id);
+      } else if (chosenImpostors.size < impostorCount) {
+        chosenImpostors.add(player.id);
       }
+
       renderImpostors();
+      save();
     };
 
-    box.append(b);
+    box.append(button);
   });
 
-  text(
+  setText(
     'scoring-message',
     'اختاروا ' + impostorCount + ' من المخادعين'
   );
+}
+
+function calculateScores() {
+  if (scoresApplied) {
+    renderLeaderboard('leaderboard-list');
+    show('leaderboard-screen');
+    return;
+  }
+
+  if (chosenImpostors.size !== impostorCount) {
+    setText(
+      'scoring-message',
+      'اختاروا ' + impostorCount + ' مخادعين بالضبط'
+    );
+    return;
+  }
+
+  if (!timedOut && current) {
+    const correct = selected === current.correct;
+
+    players.forEach(player => {
+      const isImpostor = chosenImpostors.has(player.id);
+
+      if (correct && !isImpostor) {
+        player.score += 1;
+      }
+
+      if (!correct && isImpostor) {
+        player.score += 2;
+      }
+    });
+  }
+
+  scoresApplied = true;
+
+  setText('leaderboard-round', 'بعد الجولة ' + round);
+  renderLeaderboard('leaderboard-list');
+  show('leaderboard-screen');
 }
 
 function renderLeaderboard(id) {
   const box = $(id);
   box.replaceChildren();
 
-  [...players]
-    .sort((a, b) =>
-      b.score - a.score || a.name.localeCompare(b.name, 'ar')
-    )
-    .forEach((p, i) => {
-      const row = document.createElement('div');
-      row.className = 'leaderboard-row';
+  const sorted = [...players].sort(
+    (a, b) =>
+      b.score - a.score ||
+      a.name.localeCompare(b.name, 'ar')
+  );
 
-      const name = document.createElement('span');
-      name.textContent = (i + 1) + '. ' + p.name;
+  sorted.forEach((player, index) => {
+    const row = document.createElement('div');
+    row.className = 'leaderboard-row';
 
-      const points = document.createElement('span');
-      points.className = 'leaderboard-points';
-      points.textContent = p.score + ' نقطة';
+    const name = document.createElement('span');
+    name.textContent =
+      (index + 1) + '. ' + player.name;
 
-      row.append(name, points);
-      box.append(row);
-    });
+    const points = document.createElement('span');
+    points.className = 'leaderboard-points';
+    points.textContent = player.score + ' نقطة';
+
+    row.append(name, points);
+    box.append(row);
+  });
 }
 
-async function init() {
-  try {
-    const response = await fetch('questions.json', {
-      cache: 'no-store'
-    });
+function advanceRound() {
+  if (!scoresApplied) return;
 
-    if (!response.ok) {
-      throw Error('HTTP ' + response.status);
-    }
-
-    const data = await response.json();
-
-    if (!Array.isArray(data)) {
-      throw Error('Expected array');
-    }
-
-    questions = data.filter(q =>
-      q &&
-      typeof q.id === 'number' &&
-      typeof q.question === 'string' &&
-      Array.isArray(q.options) &&
-      q.options.length === 4 &&
-      Number.isInteger(q.correct) &&
-      q.correct >= 0 &&
-      q.correct < 4
-    );
-
-    if (!questions.length) {
-      throw Error('No valid questions');
-    }
-  } catch (e) {
-    console.error(e);
-    alert(
-      'تعذر تحميل الأسئلة. أضيفوا ملف questions.json أولاً، ' +
-      'وافتحوا اللعبة عبر GitHub Pages.'
-    );
-  }
-
-  try {
-    const old = JSON.parse(localStorage.getItem(KEY) || 'null');
-
-    if (old && Array.isArray(old.players)) {
-      players = old.players;
-      impostorCount = old.impostorCount || 2;
-      round = old.round || 1;
-      deck = old.deck || [];
-      cursor = old.cursor || 0;
-
-      current =
-        questions.find(q => q.id === old.currentId) || null;
-
-      selected = old.selected ?? null;
-      locked = !!old.locked;
-      timedOut = !!old.timedOut;
-      seconds = Math.max(
-        0,
-        Math.min(60, old.seconds ?? 60)
-      );
-
-      const safe = [
-        'home-screen',
-        'rules-screen',
-        'setup-screen',
-        'roles-screen',
-        'question-screen',
-        'reveal-screen',
-        'scoring-screen',
-        'leaderboard-screen',
-        'end-screen'
-      ];
-
-      let screen = safe.includes(old.screen)
-        ? old.screen
-        : 'home-screen';
-
-      if (
-        ['question-screen', 'reveal-screen', 'scoring-screen']
-          .includes(screen) && !current
-      ) {
-        screen = 'roles-screen';
-      }
-
-      renderPlayers();
-      $('impostor-count').value = String(impostorCount);
-
-      if (current) renderQuestion();
-
-      if (screen === 'question-screen') {
-        stopTimer();
-        text('pause-btn', 'متابعة الوقت');
-      }
-
-      if (screen === 'reveal-screen') {
-        reveal();
-      } else if (screen === 'scoring-screen') {
-        renderImpostors();
-      } else if (screen === 'leaderboard-screen') {
-        renderLeaderboard('leaderboard-list');
-      } else if (screen === 'end-screen') {
-        renderLeaderboard('final-leaderboard');
-      }
-
-      show(screen);
-    }
-  } catch (e) {
-    console.error(e);
-  }
+  round += 1;
+  prepareRound();
 }
 
-$('play-btn').onclick = () => show('setup-screen');
+function startGame() {
+  if (players.length < 4) {
+    setText(
+      'setup-message',
+      'أضيفوا أربعة لاعبين على الأقل'
+    );
+    return;
+  }
+
+  if (impostorCount >= players.length) {
+    setText(
+      'setup-message',
+      'عدد المخادعين لازم يكون أقل من اللاعبين'
+    );
+    return;
+  }
+
+  if (!questions.length) {
+    setText(
+      'setup-message',
+      'تعذر تحميل الأسئلة'
+    );
+    return;
+  }
+
+  stopTimer();
+
+  players.forEach(p => p.score = 0);
+
+  round = 1;
+  current = null;
+  selected = null;
+  timedOut = false;
+  scoresApplied = false;
+  gameActive = true;
+  chosenImpostors.clear();
+
+  createDeck();
+  prepareRound();
+}
+
+function resetGame() {
+  stopTimer();
+
+  players = [];
+  impostorCount = 2;
+  round = 1;
+  deck = [];
+  cursor = 0;
+  current = null;
+  selected = null;
+  timedOut = false;
+  seconds = 60;
+  scoresApplied = false;
+  gameActive = false;
+  chosenImpostors.clear();
+
+  $('impostor-count').value = '2';
+  $('player-name').value = '';
+
+  setText('setup-message', '');
+  renderPlayers();
+
+  localStorage.removeItem(KEY);
+  localStorage.removeItem('fakh-alijabat-v1');
+  localStorage.removeItem('fakh-alijabat-v2');
+
+  show('home-screen');
+}
+
+function endGame() {
+  if (!gameActive) {
+    show('home-screen');
+    return;
+  }
+
+  stopTimer();
+  gameActive = false;
+
+  renderLeaderboard('final-leaderboard');
+  show('end-screen');
+}
+
+function confirmNewGame() {
+  if (!confirm(
+    'تبدؤون لعبة جديدة؟ راح تنمسح النقاط والجولات السابقة.'
+  )) return;
+
+  closeMenu();
+  resetGame();
+  show('setup-screen');
+}
+
+function confirmEndGame() {
+  if (!confirm(
+    'متأكدين تبغون تنهُون اللعبة الحالية؟'
+  )) return;
+
+  closeMenu();
+  endGame();
+}
+
+// MENU
+
+function createMenu() {
+  const style = document.createElement('style');
+
+  style.textContent = `
+    #menu-toggle {
+      position: fixed;
+      top: 15px;
+      left: 15px;
+      z-index: 1000;
+      background: #243957;
+      color: white;
+      border: 1px solid #53617d;
+      border-radius: 10px;
+      padding: 9px 15px;
+      font-size: 23px;
+      cursor: pointer;
+    }
+
+    #menu-panel {
+      position: fixed;
+      top: 65px;
+      left: 15px;
+      z-index: 1001;
+      width: min(290px, calc(100vw - 30px));
+      background: #17263f;
+      border: 1px solid #53617d;
+      border-radius: 15px;
+      padding: 15px;
+      box-shadow: 0 12px 35px #0005;
+    }
+
+    #menu-panel[hidden] {
+      display: none;
+    }
+
+    #menu-panel button {
+      display: block;
+      width: 100%;
+      margin: 5px 0;
+      padding: 12px;
+      border: none;
+      border-radius: 9px;
+      background: #243957;
+      color: white;
+      font-size: 16px;
+      text-align: right;
+      cursor: pointer;
+    }
+
+    #menu-panel button:hover {
+      background: #405477;
+    }
+  `;
+
+  document.head.append(style);
+
+  const toggle = document.createElement('button');
+  toggle.id = 'menu-toggle';
+  toggle.textContent = '☰';
+  toggle.setAttribute('aria-label', 'القائمة');
+
+  const panel = document.createElement('div');
+  panel.id = 'menu-panel';
+  panel.hidden = true;
+
+  const items = [
+    ['متابعة اللعب', () => closeMenu()],
+    ['ترتيب اللاعبين', () => {
+      if (!gameActive || !scoresApplied) {
+        alert('يظهر الترتيب بعد حساب نقاط الجولة');
+        return;
+      }
+
+      closeMenu();
+      renderLeaderboard('leaderboard-list');
+      show('leaderboard-screen');
+    }],
+    ['لعبة جديدة', confirmNewGame],
+    ['إنهاء اللعبة', confirmEndGame],
+    ['الصفحة الرئيسية', () => {
+      closeMenu();
+      if (screen === 'question-screen') stopTimer();
+      show('home-screen');
+    }]
+  ];
+
+  items.forEach(([label, action]) => {
+    const button = document.createElement('button');
+    button.textContent = label;
+    button.onclick = action;
+    panel.append(button);
+  });
+
+  toggle.onclick = () => {
+    panel.hidden = !panel.hidden;
+  };
+
+  document.body.append(toggle, panel);
+}
+
+function closeMenu() {
+  const panel = $('menu-panel');
+  if (panel) panel.hidden = true;
+}
+
+// BUTTONS
+
+$('play-btn').onclick = () => {
+  if (gameActive) {
+    const resume = confirm(
+      'عندكم لعبة جارية. تبغون تكملونها؟'
+    );
+
+    if (resume) {
+      if (current && !scoresApplied) {
+        if (screen === 'home-screen') {
+          renderQuestion();
+          show('question-screen');
+          // Timer stays paused until resumed.
+        }
+      } else {
+        show('roles-screen');
+      }
+
+      return;
+    }
+
+    confirmNewGame();
+    return;
+  }
+
+  show('setup-screen');
+};
 
 $('rules-btn').onclick = () => show('rules-screen');
 
@@ -424,115 +731,168 @@ $('setup-back-btn').onclick = () => show('home-screen');
 
 $('add-player-btn').onclick = addPlayer;
 
-$('player-name').addEventListener('keydown', e => {
-  if (e.key === 'Enter') addPlayer();
+$('player-name').addEventListener('keydown', event => {
+  if (event.key === 'Enter') addPlayer();
 });
 
-$('impostor-count').onchange = e => {
-  impostorCount = Number(e.target.value);
-  save('setup-screen');
+$('impostor-count').onchange = event => {
+  impostorCount = Number(event.target.value);
+  save();
 };
 
-$('start-game-btn').onclick = () => {
-  if (players.length < 4) {
-    text('setup-message', 'أضيفوا أربعة لاعبين على الأقل');
-    return;
-  }
-
-  if (impostorCount >= players.length) {
-    text(
-      'setup-message',
-      'عدد المخادعين لازم يكون أقل من عدد اللاعبين'
-    );
-    return;
-  }
-
-  if (!questions.length) {
-    text('setup-message', 'أضيفوا ملف الأسئلة أولاً');
-    return;
-  }
-
-  text('roles-count', 'عدد المخادعين: ' + impostorCount);
-  show('roles-screen');
-};
+$('start-game-btn').onclick = startGame;
 
 $('show-question-btn').onclick = nextQuestion;
 
-$('pause-btn').onclick = () => {
-  if (running) stopTimer();
-  else startTimer();
-};
+$('pause-btn').onclick = toggleTimer;
 
 $('lock-answer-btn').onclick = () => {
-  if (selected === null || locked || timedOut) return;
+  if (
+    selected === null ||
+    timedOut ||
+    screen !== 'question-screen'
+  ) return;
 
-  locked = true;
   reveal();
 };
 
 $('go-to-scoring-btn').onclick = () => {
-  selectedImpostors.clear();
   renderImpostors();
   show('scoring-screen');
 };
 
-$('calculate-scores-btn').onclick = () => {
-  if (selectedImpostors.size !== impostorCount) {
-    text(
-      'scoring-message',
-      'لازم تختاروا ' + impostorCount + ' مخادعين بالضبط'
-    );
-    return;
-  }
+$('calculate-scores-btn').onclick = calculateScores;
 
-  if (!timedOut) {
-    players.forEach(p => {
-      const imp = selectedImpostors.has(p.id);
+$('next-round-btn').onclick = advanceRound;
 
-      if (selected === current.correct && !imp) {
-        p.score += 1;
-      }
+$('end-game-btn').onclick = confirmEndGame;
 
-      if (selected !== current.correct && imp) {
-        p.score += 2;
-      }
+$('new-game-btn').onclick = confirmNewGame;
+
+// INITIALIZATION
+
+async function init() {
+  createMenu();
+
+  try {
+    const response = await fetch('questions.json', {
+      cache: 'no-store'
     });
+
+    if (!response.ok) {
+      throw new Error('Questions not found');
+    }
+
+    const data = await response.json();
+
+    if (!Array.isArray(data)) {
+      throw new Error('Invalid question file');
+    }
+
+    questions = data.filter(q =>
+      q &&
+      Number.isInteger(q.id) &&
+      typeof q.question === 'string' &&
+      Array.isArray(q.options) &&
+      q.options.length === 4 &&
+      Number.isInteger(q.correct) &&
+      q.correct >= 0 &&
+      q.correct <= 3
+    );
+
+  } catch (error) {
+    console.error(error);
+    alert('تعذر تحميل الأسئلة من questions.json');
   }
 
-  renderLeaderboard('leaderboard-list');
-  text('leaderboard-round', 'بعد الجولة ' + round);
-  show('leaderboard-screen');
-};
+  // Remove previous buggy saves.
+  localStorage.removeItem('fakh-alijabat-v1');
+  localStorage.removeItem('fakh-alijabat-v2');
 
-$('next-round-btn').onclick = () => {
-  round++;
-  text('roles-count', 'عدد المخادعين: ' + impostorCount);
-  show('roles-screen');
-};
+  try {
+    const old = JSON.parse(
+      localStorage.getItem(KEY) || 'null'
+    );
 
-$('end-game-btn').onclick = () => {
-  renderLeaderboard('final-leaderboard');
-  show('end-screen');
-};
+    if (!old || !Array.isArray(old.players)) return;
 
-$('new-game-btn').onclick = () => {
-  if (!confirm('تبدؤون لعبة جديدة وتصفّرون النقاط؟')) {
-    return;
+    players = old.players;
+    impostorCount = old.impostorCount || 2;
+    round = old.round || 1;
+    deck = Array.isArray(old.deck) ? old.deck : [];
+    cursor = old.cursor || 0;
+    current = questions.find(
+      q => q.id === old.currentId
+    ) || null;
+
+    selected = old.selected ?? null;
+    timedOut = !!old.timedOut;
+    seconds = Math.max(
+      0,
+      Math.min(60, old.seconds ?? 60)
+    );
+
+    scoresApplied = !!old.scoresApplied;
+    gameActive = !!old.gameActive;
+    chosenImpostors = new Set(
+      old.chosenImpostors || []
+    );
+
+    $('impostor-count').value = String(impostorCount);
+
+    renderPlayers();
+
+    const validScreens = [
+      'home-screen',
+      'rules-screen',
+      'setup-screen',
+      'roles-screen',
+      'question-screen',
+      'reveal-screen',
+      'scoring-screen',
+      'leaderboard-screen',
+      'end-screen'
+    ];
+
+    const target = validScreens.includes(old.screen)
+      ? old.screen
+      : 'home-screen';
+
+    if (current) {
+      renderQuestion();
+    }
+
+    if (target === 'reveal-screen' && current) {
+      reveal();
+    } else if (target === 'scoring-screen' && current) {
+      renderImpostors();
+      show(target);
+    } else if (target === 'leaderboard-screen') {
+      renderLeaderboard('leaderboard-list');
+      setText(
+        'leaderboard-round',
+        'بعد الجولة ' + round
+      );
+      show(target);
+    } else if (target === 'end-screen') {
+      renderLeaderboard('final-leaderboard');
+      show(target);
+    } else if (
+      target === 'question-screen' &&
+      !current
+    ) {
+      show('roles-screen');
+    } else {
+      show(target);
+    }
+
+    // Never automatically restart a timer after refresh.
+    stopTimer();
+
+  } catch (error) {
+    console.error('Restore error', error);
+    resetGame();
   }
-
-  stopTimer();
-  players = [];
-  round = 1;
-  deck = [];
-  cursor = 0;
-  current = null;
-  selected = null;
-  locked = false;
-  timedOut = false;
-
-  localStorage.removeItem(KEY);
-  renderPlayers();
-  show('home-screen');
-};
+}
 
 init();
